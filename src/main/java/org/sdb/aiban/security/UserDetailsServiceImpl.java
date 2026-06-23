@@ -1,7 +1,11 @@
 package org.sdb.aiban.security;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import org.sdb.aiban.entity.SysUser;
+import org.sdb.aiban.mapper.UserMapper;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -13,19 +17,19 @@ import java.util.Collection;
 import java.util.Collections;
 
 @Service
+@RequiredArgsConstructor
 public class UserDetailsServiceImpl implements UserDetailsService {
+
+    private final UserMapper userMapper;
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        // 占位实现：返回固定用户
-        // 后续模块1（用户体系）中用 UserMapper 查询数据库
-        if ("admin".equals(username)) {
-            return new UserPrincipal(1L, "admin", "$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi", "ADMIN");
+        SysUser user = userMapper.selectOne(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username));
+        if (user == null) {
+            throw new UsernameNotFoundException("用户不存在: " + username);
         }
-        if ("student".equals(username)) {
-            return new UserPrincipal(2L, "student", "$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi", "STUDENT");
-        }
-        throw new UsernameNotFoundException("用户不存在: " + username);
+        return new UserPrincipal(user.getId(), user.getUsername(), user.getPassword(), user.getRole());
     }
 
     @Data
