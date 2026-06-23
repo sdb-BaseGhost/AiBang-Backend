@@ -109,7 +109,7 @@ public class UserService {
 
             // 保存文件
             Path filePath = basePath.resolve(fileName);
-            file.transferTo(filePath.toFile());
+            Files.copy(file.getInputStream(), filePath);
 
             // 更新用户头像
             user.setAvatar("/" + relativePath);
