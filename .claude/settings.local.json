@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version *)",
+      "Bash(npm -v)",
+      "Bash(mysql --version)",
+      "Bash(mysqld --version)",
+      "Bash(mysql *)",
+      "Bash(go run *)",
+      "Bash(npm install *)",
+      "Bash(echo \"Backend PID: $!\")",
+      "Bash(npm run *)",
+      "Bash(echo \"Frontend PID: $!\")",
+      "Bash(taskkill *)",
+      "Bash(echo \"Backend started, PID: $!\")",
+      "Read(//tmp/**)",
+      "Bash(tasklist)",
+      "Bash(claude --version)",
+      "Bash(wmic process *)",
+      "Bash(tasklist /FI \"PID eq 8752\" /V)",
+      "Bash(claude -p \"say hello\" --output-format stream-json --verbose --dangerously-skip-permissions)",
+      "Bash(netstat -ano)"
+    ]
+  }
+}
