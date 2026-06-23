@@ -1,0 +1,16 @@
+-- 学习记录表
+
+CREATE TABLE learning_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    type VARCHAR(20) NOT NULL COMMENT '类型：SKILL_STUDY/AI_CHAT/RESUME/CHECKIN',
+    title VARCHAR(100) NOT NULL COMMENT '活动标题',
+    duration INT NOT NULL DEFAULT 0 COMMENT '时长（分钟）',
+    detail VARCHAR(500) DEFAULT '' COMMENT '详细描述',
+    skill_id BIGINT DEFAULT NULL COMMENT '关联技能ID（可选）',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    is_deleted INT NOT NULL DEFAULT 0,
+    INDEX idx_user_id (user_id),
+    INDEX idx_user_time (user_id, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='学习记录表';

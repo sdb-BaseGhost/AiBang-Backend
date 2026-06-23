@@ -1,8 +1,9 @@
 package org.sdb.aiban.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.sdb.aiban.common.exception.BusinessException;
 import org.sdb.aiban.common.result.ResultCode;
 import org.sdb.aiban.dto.request.UpdateSkillProgressRequest;
@@ -16,10 +17,17 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class SkillService {
 
     private final UserSkillProgressMapper userSkillProgressMapper;
+
+    @Lazy
+    @Autowired
+    private LearningService learningService;
+
+    public SkillService(UserSkillProgressMapper userSkillProgressMapper) {
+        this.userSkillProgressMapper = userSkillProgressMapper;
+    }
 
     private static final List<Map<String, Object>> CATEGORIES = List.of(
         Map.of("id", 1L, "name", "编程语言", "icon", "code", "sortOrder", 1),
@@ -170,6 +178,14 @@ public class SkillService {
             userSkillProgressMapper.insert(np);
         }
         double op = calculateOverallProgress(userId);
+
+        // 如果提供了时长，创建学习记录
+        if (request.getDuration() != null && request.getDuration() > 0) {
+            learningService.createRecord(userId, "SKILL_STUDY",
+                "学习了 " + skill.get("name"), request.getDuration(),
+                request.getNote(), skillId);
+        }
+
         return UpdateSkillProgressResponse.builder().skillId(skillId).skillName((String) skill.get("name"))
             .progress(progress).status(status).overallProgress(op).build();
     }

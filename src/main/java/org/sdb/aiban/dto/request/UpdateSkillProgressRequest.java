@@ -21,4 +21,7 @@ public class UpdateSkillProgressRequest {
     private Integer rating;
 
     private String note;
+
+    @Min(value = 0, message = "时长不能为负数")
+    private Integer duration;
 }
