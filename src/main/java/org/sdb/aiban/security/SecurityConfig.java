@@ -36,6 +36,8 @@ public class SecurityConfig {
                 .requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**").permitAll()
                 // OPTIONS 请求放行（CORS 预检）
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                // 技能树公开接口
+                .requestMatchers("/api/skill/categories", "/api/skill/tree").permitAll()
                 // 管理员接口需要 ADMIN 角色
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 // 其余请求需要认证

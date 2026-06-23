@@ -1,0 +1,16 @@
+-- 用户技能进度表
+
+CREATE TABLE user_skill_progress (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL COMMENT '用户ID',
+    skill_id BIGINT NOT NULL COMMENT '技能ID',
+    progress INT NOT NULL DEFAULT 0 COMMENT '进度 0-100',
+    status VARCHAR(20) NOT NULL DEFAULT 'NOT_STARTED' COMMENT 'NOT_STARTED/IN_PROGRESS/COMPLETED',
+    rating INT DEFAULT 0 COMMENT '自评等级 1-5',
+    note VARCHAR(500) DEFAULT '' COMMENT '学习笔记',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    is_deleted INT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_user_skill (user_id, skill_id),
+    INDEX idx_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户技能进度表';
