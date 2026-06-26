@@ -32,3 +32,10 @@ build/
 ### VS Code ###
 .vscode/
 uploads/
+
+### OS ###
+.DS_Store
+Thumbs.db
+
+### Logs ###
+*.log
