@@ -1,5 +1,5 @@
 -- 创建用户表
-
+use aiban;
 CREATE TABLE sys_user (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE COMMENT '用户名',

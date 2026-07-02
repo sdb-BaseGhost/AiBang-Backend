@@ -19,7 +19,10 @@
       "Bash(wmic process *)",
       "Bash(tasklist /FI \"PID eq 8752\" /V)",
       "Bash(claude -p \"say hello\" --output-format stream-json --verbose --dangerously-skip-permissions)",
-      "Bash(netstat -ano)"
+      "Bash(netstat -ano)",
+      "Bash(mvn compile *)",
+      "Bash(mvn spring-boot:run -q)",
+      "Bash(findstr :8081)"
     ]
   }
 }

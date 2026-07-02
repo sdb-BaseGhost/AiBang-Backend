@@ -17,7 +17,6 @@ import org.sdb.aiban.dto.response.UserImportVO;
 import org.sdb.aiban.dto.response.UserResponse;
 import org.sdb.aiban.entity.LearningRecord;
 import org.sdb.aiban.entity.SysUser;
-import org.sdb.aiban.entity.UserCheckin;
 import org.sdb.aiban.entity.UserSkillProgress;
 import org.sdb.aiban.mapper.*;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -39,7 +38,6 @@ public class AdminService {
 
     private final UserMapper userMapper;
     private final LearningRecordMapper learningRecordMapper;
-    private final UserCheckinMapper userCheckinMapper;
     private final UserSkillProgressMapper userSkillProgressMapper;
     private final PasswordEncoder passwordEncoder;
 
@@ -159,7 +157,8 @@ public class AdminService {
         int todayMinutes = allRecords.stream()
             .filter(r -> r.getCreateTime().isAfter(todayStart))
             .mapToInt(LearningRecord::getDuration).sum();
-        long totalCheckins = userCheckinMapper.selectCount(new LambdaQueryWrapper<>());
+        // 打卡统计已改为 Redis，这里暂时设为 0
+        long totalCheckins = 0;
 
         // 技能统计
         long totalSkills = 11; // 硬编码的顶级技能数

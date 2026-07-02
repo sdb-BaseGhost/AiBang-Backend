@@ -13,4 +13,6 @@ public class SkillCategoryVO {
     private String icon;
     private Integer sortOrder;
     private Integer skillCount;
+    private Integer totalUsers;
+    private Double avgCompletionRate;
 }
