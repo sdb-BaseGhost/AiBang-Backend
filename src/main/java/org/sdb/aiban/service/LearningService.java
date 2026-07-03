@@ -7,8 +7,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.sdb.aiban.common.result.PageResult;
 import org.sdb.aiban.dto.response.*;
 import org.sdb.aiban.entity.LearningRecord;
+import org.sdb.aiban.entity.SkillChapter;
+import org.sdb.aiban.entity.UserChapterProgress;
 import org.sdb.aiban.entity.UserSkillProgress;
 import org.sdb.aiban.mapper.LearningRecordMapper;
+import org.sdb.aiban.mapper.SkillChapterMapper;
+import org.sdb.aiban.mapper.UserChapterProgressMapper;
 import org.sdb.aiban.mapper.UserSkillProgressMapper;
 import org.springframework.stereotype.Service;
 
@@ -27,6 +31,8 @@ public class LearningService {
 
     private final LearningRecordMapper learningRecordMapper;
     private final UserSkillProgressMapper userSkillProgressMapper;
+    private final SkillChapterMapper skillChapterMapper;
+    private final UserChapterProgressMapper userChapterProgressMapper;
     private final SkillService skillService;
 
     /**
@@ -84,14 +90,8 @@ public class LearningService {
                 .build());
         }
 
-        // 各分类进度
-        List<LearningDashboardVO.CategoryProgress> categoryProgress = List.of(
-            LearningDashboardVO.CategoryProgress.builder().categoryName("编程语言").progress(62.5).build(),
-            LearningDashboardVO.CategoryProgress.builder().categoryName("前端开发").progress(25.0).build(),
-            LearningDashboardVO.CategoryProgress.builder().categoryName("后端开发").progress(14.3).build(),
-            LearningDashboardVO.CategoryProgress.builder().categoryName("数据库").progress(40.0).build(),
-            LearningDashboardVO.CategoryProgress.builder().categoryName("AI/机器学习").progress(0.0).build()
-        );
+        // 各分类进度（从数据库动态计算）
+        List<LearningDashboardVO.CategoryProgress> categoryProgress = skillService.getCategoryProgressList(userId);
 
         return LearningDashboardVO.builder()
             .summary(LearningDashboardVO.DashboardSummary.builder()
@@ -110,14 +110,13 @@ public class LearningService {
      * 获取学习时间线
      */
     public PageResult<LearningTimelineVO> getTimeline(Long userId, int page, int size) {
-        Page<LearningRecord> pageParam = new Page<>(page, size);
-        Page<LearningRecord> result = learningRecordMapper.selectPage(pageParam,
+        // 1. 查询学习记录
+        List<LearningRecord> learningRecords = learningRecordMapper.selectList(
             new LambdaQueryWrapper<LearningRecord>()
                 .eq(LearningRecord::getUserId, userId)
                 .orderByDesc(LearningRecord::getCreateTime));
 
-        Page<LearningTimelineVO> responsePage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
-        responsePage.setRecords(result.getRecords().stream()
+        List<LearningTimelineVO> learningItems = learningRecords.stream()
             .map(r -> LearningTimelineVO.builder()
                 .id(r.getId())
                 .type(r.getType())
@@ -126,7 +125,73 @@ public class LearningService {
                 .detail(r.getDetail())
                 .createTime(r.getCreateTime())
                 .build())
-            .toList());
+            .toList();
+
+        // 2. 查询章节进度记录
+        List<UserChapterProgress> chapterProgressList = userChapterProgressMapper.selectList(
+            new LambdaQueryWrapper<UserChapterProgress>()
+                .eq(UserChapterProgress::getUserId, userId)
+                .eq(UserChapterProgress::getStatus, "COMPLETED")
+                .orderByDesc(UserChapterProgress::getCreateTime));
+
+        // 3. 查询章节标题
+        List<Long> chapterIds = chapterProgressList.stream()
+            .map(UserChapterProgress::getChapterId)
+            .toList();
+
+        Map<Long, String> chapterTitleMap = new HashMap<>();
+        if (!chapterIds.isEmpty()) {
+            List<SkillChapter> chapters = skillChapterMapper.selectList(
+                new LambdaQueryWrapper<SkillChapter>()
+                    .in(SkillChapter::getId, chapterIds));
+            for (SkillChapter chapter : chapters) {
+                chapterTitleMap.put(chapter.getId(), chapter.getTitle());
+            }
+        }
+
+        List<LearningTimelineVO> chapterItems = chapterProgressList.stream()
+            .map(cp -> {
+                String chapterTitle = chapterTitleMap.getOrDefault(cp.getChapterId(), "未知章节");
+                return LearningTimelineVO.builder()
+                    .id(cp.getId())
+                    .type("CHAPTER_STUDY")
+                    .title(chapterTitle)
+                    .duration(cp.getScore())  // 分数放在duration字段
+                    .detail("")
+                    .createTime(cp.getCreateTime())
+                    .build();
+            })
+            .toList();
+
+        // 4. 合并所有记录
+        List<LearningTimelineVO> allItems = new ArrayList<>();
+        allItems.addAll(learningItems);
+        allItems.addAll(chapterItems);
+
+        // 5. 按时间排序（最新的在前）
+        allItems.sort((a, b) -> {
+            if (a.getCreateTime() == null && b.getCreateTime() == null) return 0;
+            if (a.getCreateTime() == null) return 1;
+            if (b.getCreateTime() == null) return -1;
+            return b.getCreateTime().compareTo(a.getCreateTime());
+        });
+
+        // 6. 手动分页
+        long total = allItems.size();
+        int totalPages = (int) Math.ceil((double) total / size);
+        int fromIndex = (page - 1) * size;
+        int toIndex = Math.min(fromIndex + size, allItems.size());
+
+        List<LearningTimelineVO> pageItems;
+        if (fromIndex >= allItems.size()) {
+            pageItems = new ArrayList<>();
+        } else {
+            pageItems = allItems.subList(fromIndex, toIndex);
+        }
+
+        Page<LearningTimelineVO> responsePage = new Page<>(page, size, total);
+        responsePage.setPages(totalPages);
+        responsePage.setRecords(pageItems);
 
         return PageResult.from(responsePage);
     }

@@ -235,4 +235,65 @@ public class SkillService {
         Skill skill = skillMapper.selectById(skillId);
         return skill != null ? skill.getName() : "未知技能";
     }
+
+    /**
+     * 获取每个技能分类的完成率进度
+     * 计算公式：已完成技能数 / 总技能数 × 100%
+     */
+    public List<LearningDashboardVO.CategoryProgress> getCategoryProgressList(Long userId) {
+        // 1. 查询所有技能分类
+        List<SkillCategory> categories = skillCategoryMapper.selectList(
+            new LambdaQueryWrapper<SkillCategory>()
+                .orderByAsc(SkillCategory::getSortOrder)
+                .orderByAsc(SkillCategory::getId));
+
+        // 2. 查询用户已完成的技能ID集合
+        List<UserSkillProgress> completedList = userSkillProgressMapper.selectList(
+            new LambdaQueryWrapper<UserSkillProgress>()
+                .eq(UserSkillProgress::getUserId, userId)
+                .eq(UserSkillProgress::getStatus, "COMPLETED"));
+        Set<Long> completedSkillIds = completedList.stream()
+            .map(UserSkillProgress::getSkillId)
+            .collect(Collectors.toSet());
+
+        // 3. 对于每个分类，计算完成率
+        List<LearningDashboardVO.CategoryProgress> result = new ArrayList<>();
+        for (SkillCategory category : categories) {
+            // 查询该分类下的所有根技能数量
+            Long totalSkills = skillMapper.selectCount(
+                new LambdaQueryWrapper<Skill>()
+                    .eq(Skill::getCategoryId, category.getId())
+                    .isNull(Skill::getParentSkillId));
+
+            // 如果该分类下没有技能，跳过
+            if (totalSkills == 0) {
+                continue;
+            }
+
+            // 查询该分类下所有根技能的ID列表
+            List<Skill> categorySkills = skillMapper.selectList(
+                new LambdaQueryWrapper<Skill>()
+                    .eq(Skill::getCategoryId, category.getId())
+                    .isNull(Skill::getParentSkillId)
+                    .select(Skill::getId));
+            Set<Long> categorySkillIds = categorySkills.stream()
+                .map(Skill::getId)
+                .collect(Collectors.toSet());
+
+            // 计算该分类下已完成的技能数量
+            long completedCount = categorySkillIds.stream()
+                .filter(completedSkillIds::contains)
+                .count();
+
+            // 计算完成率
+            double progress = Math.round(completedCount * 100.0 / totalSkills * 10.0) / 10.0;
+
+            result.add(LearningDashboardVO.CategoryProgress.builder()
+                .categoryName(category.getName())
+                .progress(progress)
+                .build());
+        }
+
+        return result;
+    }
 }
