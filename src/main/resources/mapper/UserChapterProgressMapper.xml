@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.sdb.aiban.mapper.UserChapterProgressMapper">
+
+    <select id="selectCompletedRecords"
+            resultType="org.sdb.aiban.dto.response.LearningRecordVO">
+        SELECT
+            u.id          AS userId,
+            u.username    AS username,
+            u.nickname    AS nickname,
+            u.avatar      AS avatar,
+            sc.id         AS chapterId,
+            sc.title      AS chapterTitle,
+            s.name        AS skillName,
+            ucp.score     AS score,
+            ucp.update_time AS updateTime
+        FROM user_chapter_progress ucp
+        JOIN sys_user    u  ON ucp.user_id    = u.id
+        JOIN skill_chapter sc ON ucp.chapter_id = sc.id
+        JOIN skill       s  ON sc.skill_id    = s.id
+        WHERE ucp.status = 'COMPLETED'
+        <if test="userId != null">
+            AND ucp.user_id = #{userId}
+        </if>
+        ORDER BY ucp.update_time DESC
+    </select>
+
+</mapper>

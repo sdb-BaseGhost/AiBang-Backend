@@ -1,6 +1,7 @@
 package org.sdb.aiban.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,9 +14,12 @@ import org.sdb.aiban.dto.request.ChangeRoleRequest;
 import org.sdb.aiban.dto.request.ChangeStatusRequest;
 import org.sdb.aiban.dto.request.UserQueryRequest;
 import org.sdb.aiban.dto.response.AdminDashboardVO;
+import org.sdb.aiban.dto.response.LearningRecordVO;
 import org.sdb.aiban.dto.response.UserImportVO;
 import org.sdb.aiban.dto.response.UserResponse;
+import org.sdb.aiban.entity.DailyStudyDuration;
 import org.sdb.aiban.entity.LearningRecord;
+import org.sdb.aiban.entity.Skill;
 import org.sdb.aiban.entity.SysUser;
 import org.sdb.aiban.entity.UserSkillProgress;
 import org.sdb.aiban.mapper.*;
@@ -30,6 +34,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -37,8 +42,13 @@ import java.util.*;
 public class AdminService {
 
     private final UserMapper userMapper;
+    private final SkillMapper skillMapper;
     private final LearningRecordMapper learningRecordMapper;
+    private final DailyStudyDurationMapper dailyStudyDurationMapper;
     private final UserSkillProgressMapper userSkillProgressMapper;
+    private final UserChapterProgressMapper userChapterProgressMapper;
+    private final AiChatMessageMapper aiChatMessageMapper;
+    private final AiResumeMapper aiResumeMapper;
     private final PasswordEncoder passwordEncoder;
 
     /**
@@ -49,9 +59,13 @@ public class AdminService {
 
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
 
-        // 模糊搜索用户名
-        if (StringUtils.hasText(request.getUsername())) {
-            wrapper.like(SysUser::getUsername, request.getUsername());
+        // 模糊搜索用户名/昵称/邮箱
+        if (StringUtils.hasText(request.getKeyword())) {
+            String kw = request.getKeyword();
+            wrapper.and(w -> w
+                .like(SysUser::getUsername, kw)
+                .or().like(SysUser::getNickname, kw)
+                .or().like(SysUser::getEmail, kw));
         }
 
         // 筛选角色
@@ -69,10 +83,24 @@ public class AdminService {
 
         Page<SysUser> result = userMapper.selectPage(page, wrapper);
 
+        // 批量查询当前页用户的学习总时长（分钟→小时）
+        List<Long> userIds = result.getRecords().stream()
+            .map(SysUser::getId).collect(Collectors.toList());
+        Map<Long, Double> studyHoursMap = new HashMap<>();
+        if (!userIds.isEmpty()) {
+            List<DailyStudyDuration> durations = dailyStudyDurationMapper.selectList(
+                new LambdaQueryWrapper<DailyStudyDuration>()
+                    .in(DailyStudyDuration::getUserId, userIds));
+            for (DailyStudyDuration d : durations) {
+                studyHoursMap.merge(d.getUserId(),
+                    d.getDurationMinutes() / 60.0, Double::sum);
+            }
+        }
+
         // 转换为 UserResponse
         Page<UserResponse> responsePage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
         responsePage.setRecords(result.getRecords().stream()
-                .map(this::buildUserResponse)
+                .map(user -> buildUserResponse(user, studyHoursMap))
                 .toList());
 
         return PageResult.from(responsePage);
@@ -140,8 +168,9 @@ public class AdminService {
 
     /**
      * 获取仪表盘统计数据
+     * @param userId 可选，指定时只返回该用户的学习趋势
      */
-    public AdminDashboardVO getDashboard() {
+    public AdminDashboardVO getDashboard(Long userId) {
         // 用户统计
         long totalUsers = userMapper.selectCount(new LambdaQueryWrapper<>());
         LocalDateTime todayStart = LocalDateTime.of(LocalDate.now(), LocalTime.MIN);
@@ -161,29 +190,77 @@ public class AdminService {
         long totalCheckins = 0;
 
         // 技能统计
-        long totalSkills = 11; // 硬编码的顶级技能数
+        List<Skill> rootSkills = skillMapper.selectList(
+            new LambdaQueryWrapper<Skill>().isNull(Skill::getParentSkillId));
+        int totalSkills = rootSkills.size();
+
         List<UserSkillProgress> allProgress = userSkillProgressMapper.selectList(new LambdaQueryWrapper<>());
+
+        // 平均完成率
         double avgCompletion = 0;
-        if (!allProgress.isEmpty()) {
+        if (!allProgress.isEmpty() && totalSkills > 0 && totalUsers > 0) {
             long completed = allProgress.stream().filter(p -> "COMPLETED".equals(p.getStatus())).count();
-            avgCompletion = Math.round(completed * 100.0 / (totalSkills * getTotalUsers()) * 10.0) / 10.0;
+            avgCompletion = Math.round(completed * 100.0 / (totalSkills * totalUsers) * 10.0) / 10.0;
         }
 
+        // 技能完成率排行（按「该技能已完成用户数 / 总用户数」从高到低）
+        Map<Long, Long> completedCountBySkill = allProgress.stream()
+            .filter(p -> "COMPLETED".equals(p.getStatus()))
+            .collect(Collectors.groupingBy(UserSkillProgress::getSkillId, Collectors.counting()));
+
+        List<AdminDashboardVO.TopSkill> topSkills = rootSkills.stream()
+            .map(skill -> {
+                long done = completedCountBySkill.getOrDefault(skill.getId(), 0L);
+                double rate = totalUsers > 0 ? Math.round(done * 1000.0 / totalUsers) / 10.0 : 0;
+                return new AdminDashboardVO.TopSkill(skill.getName(), rate);
+            })
+            .sorted(Comparator.comparingDouble(AdminDashboardVO.TopSkill::getCompletionRate).reversed())
+            .limit(10)
+            .collect(Collectors.toList());
+
         // 每周趋势（最近7天）
+        // 如果指定了 userId，从 daily_study_duration 按用户查询；否则沿用 learning_record 汇总
+        LocalDate today = LocalDate.now();
+        Map<LocalDate, Integer> userDurationMap = new HashMap<>();
+        if (userId != null) {
+            List<DailyStudyDuration> userDurations = dailyStudyDurationMapper.selectList(
+                new LambdaQueryWrapper<DailyStudyDuration>()
+                    .eq(DailyStudyDuration::getUserId, userId)
+                    .ge(DailyStudyDuration::getStudyDate, today.minusDays(6))
+                    .le(DailyStudyDuration::getStudyDate, today));
+            for (DailyStudyDuration d : userDurations) {
+                userDurationMap.put(d.getStudyDate(), d.getDurationMinutes());
+            }
+        }
+
         List<AdminDashboardVO.DailyTrend> weeklyTrend = new ArrayList<>();
         for (int i = 6; i >= 0; i--) {
-            LocalDate date = LocalDate.now().minusDays(i);
+            LocalDate date = today.minusDays(i);
             LocalDateTime dayStart = LocalDateTime.of(date, LocalTime.MIN);
             LocalDateTime dayEnd = LocalDateTime.of(date, LocalTime.MAX);
-            long dayUsers = userMapper.selectCount(
-                new LambdaQueryWrapper<SysUser>().ge(SysUser::getCreateTime, dayStart).le(SysUser::getCreateTime, dayEnd));
-            int dayMinutes = allRecords.stream()
-                .filter(r -> !r.getCreateTime().isBefore(dayStart) && !r.getCreateTime().isAfter(dayEnd))
-                .mapToInt(LearningRecord::getDuration).sum();
+
+            int dayMinutes;
+            long dayUsers = 0;
+            if (userId != null) {
+                dayMinutes = userDurationMap.getOrDefault(date, 0);
+            } else {
+                dayUsers = userMapper.selectCount(
+                    new LambdaQueryWrapper<SysUser>().ge(SysUser::getCreateTime, dayStart).le(SysUser::getCreateTime, dayEnd));
+                dayMinutes = allRecords.stream()
+                    .filter(r -> !r.getCreateTime().isBefore(dayStart) && !r.getCreateTime().isAfter(dayEnd))
+                    .mapToInt(LearningRecord::getDuration).sum();
+            }
+
+            // 统计当日 AI Token 消耗（聊天 + 简历）
+            Long chatTokens = aiChatMessageMapper.selectDailyTokens(dayStart, dayEnd);
+            Long resumeTokens = aiResumeMapper.selectDailyTokens(dayStart, dayEnd);
+            long dayTokens = (chatTokens != null ? chatTokens : 0) + (resumeTokens != null ? resumeTokens : 0);
+
             weeklyTrend.add(AdminDashboardVO.DailyTrend.builder()
                 .date(date.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")))
                 .users(dayUsers)
-                .hours((long) (dayMinutes / 60.0))
+                .hours((long) dayMinutes)
+                .tokens(dayTokens)
                 .build());
         }
 
@@ -193,13 +270,22 @@ public class AdminService {
             .learningStats(AdminDashboardVO.LearningStats.builder()
                 .totalStudyHours(totalHours).todayStudyMinutes(todayMinutes).totalCheckins(totalCheckins).build())
             .skillStats(AdminDashboardVO.SkillStats.builder()
-                .totalSkills((int) totalSkills).avgCompletionRate(avgCompletion).topSkills(List.of()).build())
+                .totalSkills(totalSkills).avgCompletionRate(avgCompletion).topSkills(topSkills).build())
             .weeklyTrend(weeklyTrend)
             .build();
     }
 
     private long getTotalUsers() {
         return userMapper.selectCount(new LambdaQueryWrapper<>());
+    }
+
+    /**
+     * 分页查询已完成的学习记录
+     */
+    public PageResult<LearningRecordVO> getLearningRecords(Long userId, Integer page, Integer size) {
+        Page<LearningRecordVO> pageParam = new Page<>(page, size);
+        IPage<LearningRecordVO> result = userChapterProgressMapper.selectCompletedRecords(pageParam, userId);
+        return PageResult.from(result);
     }
 
     /**
@@ -308,9 +394,17 @@ public class AdminService {
     }
 
     /**
-     * 构建用户响应（包含完整信息，管理员可见）
+     * 构建用户响应（getUserDetail 单用户场景，无学习时长）
      */
     private UserResponse buildUserResponse(SysUser user) {
+        return buildUserResponse(user, new HashMap<>());
+    }
+
+    /**
+     * 构建用户响应（包含完整信息，管理员可见）
+     */
+    private UserResponse buildUserResponse(SysUser user, Map<Long, Double> studyHoursMap) {
+        double hours = Math.round(studyHoursMap.getOrDefault(user.getId(), 0.0) * 10.0) / 10.0;
         return UserResponse.builder()
                 .userId(user.getId())
                 .username(user.getUsername())
@@ -320,6 +414,7 @@ public class AdminService {
                 .phone(user.getPhone()) // 管理员看到完整手机号
                 .role(user.getRole())
                 .bio(user.getBio())
+                .totalStudyHours(hours)
                 .createTime(user.getCreateTime())
                 .build();
     }

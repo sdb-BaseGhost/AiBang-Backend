@@ -6,14 +6,17 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.sdb.aiban.common.result.Result;
 import org.sdb.aiban.dto.request.AutoDurationRequest;
+import org.sdb.aiban.dto.request.DailyDurationRequest;
 import org.sdb.aiban.dto.response.CheckinRecordsVO;
 import org.sdb.aiban.dto.response.CheckinResponse;
 import org.sdb.aiban.service.CheckinRedisService;
+import org.sdb.aiban.service.DailyStudyDurationService;
 import org.sdb.aiban.service.LearningService;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.Map;
 
 @Tag(name = "学习打卡", description = "每日打卡、打卡记录")
@@ -24,6 +27,7 @@ public class CheckinController {
 
     private final CheckinRedisService checkinRedisService;
     private final LearningService learningService;
+    private final DailyStudyDurationService dailyStudyDurationService;
 
     @Operation(summary = "每日打卡")
     @PostMapping
@@ -32,12 +36,28 @@ public class CheckinController {
         return Result.success(checkinRedisService.checkin(userId));
     }
 
+    @Operation(summary = "打卡+选择学习时长")
+    @PostMapping("/daily")
+    public Result<CheckinResponse> checkinWithDailyDuration(
+            Authentication authentication,
+            @Valid @RequestBody DailyDurationRequest request) {
+        Long userId = (Long) authentication.getPrincipal();
+        return Result.success(checkinRedisService.checkinWithDailyDuration(userId, request.getDurationMinutes()));
+    }
+
     @Operation(summary = "查询今日打卡状态")
     @GetMapping("/today")
-    public Result<Map<String, Boolean>> getTodayStatus(Authentication authentication) {
+    public Result<Map<String, Object>> getTodayStatus(Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();
         boolean hasCheckedIn = checkinRedisService.hasCheckedInToday(userId);
-        return Result.success(Map.of("hasCheckedIn", hasCheckedIn));
+        Integer todayDuration = null;
+        if (hasCheckedIn) {
+            todayDuration = dailyStudyDurationService.getTodayDuration(userId);
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("hasCheckedIn", hasCheckedIn);
+        result.put("todayDurationMinutes", todayDuration != null ? todayDuration : 0);
+        return Result.success(result);
     }
 
     @Operation(summary = "获取月度打卡记录")

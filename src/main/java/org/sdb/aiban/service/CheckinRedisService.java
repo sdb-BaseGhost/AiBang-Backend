@@ -20,6 +20,7 @@ import java.util.List;
 public class CheckinRedisService {
 
     private final StringRedisTemplate redisTemplate;
+    private final DailyStudyDurationService dailyStudyDurationService;
 
     private static final String BITMAP_KEY_PREFIX = "checkin:bitmap:";
     private static final String STREAK_KEY_PREFIX = "checkin:streak:";
@@ -32,17 +33,24 @@ public class CheckinRedisService {
         String bitmapKey = getBitmapKey(userId, today.getYear(), today.getMonthValue());
         int dayOffset = today.getDayOfMonth() - 1;
 
+        log.info("开始打卡: userId={}, bitmapKey={}, dayOffset={}", userId, bitmapKey, dayOffset);
+
         // 检查是否已打卡
         Boolean alreadyCheckedIn = redisTemplate.opsForValue().getBit(bitmapKey, dayOffset);
+        log.info("检查打卡状态: alreadyCheckedIn={}", alreadyCheckedIn);
         if (Boolean.TRUE.equals(alreadyCheckedIn)) {
+            log.warn("用户已打卡，拒绝重复打卡: userId={}", userId);
             throw new BusinessException(ResultCode.BAD_REQUEST, "今日已打卡");
         }
 
         // 设置打卡（Bitmap）
         redisTemplate.opsForValue().setBit(bitmapKey, dayOffset, true);
+        log.info("设置打卡记录成功");
 
         // 设置过期时间（下个月1号）
-        redisTemplate.expire(bitmapKey, getExpireTime(today));
+        java.time.Duration expireTime = getExpireTime(today);
+        redisTemplate.expire(bitmapKey, expireTime);
+        log.info("设置过期时间: expireTime={}秒", expireTime.getSeconds());
 
         // 计算连续打卡天数
         int streak = calculateStreak(userId);
@@ -56,6 +64,42 @@ public class CheckinRedisService {
     }
 
     /**
+     * 打卡 + 保存每日学习时长
+     */
+    public CheckinResponse checkinWithDailyDuration(Long userId, int durationMinutes) {
+        LocalDate today = LocalDate.now();
+        String bitmapKey = getBitmapKey(userId, today.getYear(), today.getMonthValue());
+        int dayOffset = today.getDayOfMonth() - 1;
+
+        // 检查是否已打卡
+        Boolean alreadyCheckedIn = redisTemplate.opsForValue().getBit(bitmapKey, dayOffset);
+        if (Boolean.TRUE.equals(alreadyCheckedIn)) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "今日已打卡");
+        }
+
+        // 设置打卡（Bitmap）
+        redisTemplate.opsForValue().setBit(bitmapKey, dayOffset, true);
+
+        // 设置过期时间
+        java.time.Duration expireTime = getExpireTime(today);
+        redisTemplate.expire(bitmapKey, expireTime);
+
+        // 保存每日学习时长
+        dailyStudyDurationService.save(userId, today, durationMinutes);
+
+        // 计算连续打卡天数
+        int streak = calculateStreak(userId);
+
+        log.info("用户打卡+学习时长: userId={}, streak={}, duration={}min", userId, streak, durationMinutes);
+
+        return CheckinResponse.builder()
+                .date(today)
+                .streak(streak)
+                .durationMinutes(durationMinutes)
+                .build();
+    }
+
+    /**
      * 查询今日是否打卡
      */
     public boolean hasCheckedInToday(Long userId) {
@@ -63,7 +107,9 @@ public class CheckinRedisService {
         String bitmapKey = getBitmapKey(userId, today.getYear(), today.getMonthValue());
         int dayOffset = today.getDayOfMonth() - 1;
 
-        return Boolean.TRUE.equals(redisTemplate.opsForValue().getBit(bitmapKey, dayOffset));
+        Boolean isCheckedIn = redisTemplate.opsForValue().getBit(bitmapKey, dayOffset);
+        log.info("查询打卡状态: userId={}, bitmapKey={}, dayOffset={}, result={}", userId, bitmapKey, dayOffset, isCheckedIn);
+        return Boolean.TRUE.equals(isCheckedIn);
     }
 
     /**
@@ -89,8 +135,12 @@ public class CheckinRedisService {
         int currentStreak = calculateStreak(userId);
         int longestStreak = calculateLongestStreak(userId, year, month);
 
+        // 查询每日学习时长
+        java.util.Map<String, Integer> dailyDurations = dailyStudyDurationService.getMonthlyDurations(userId, year, month);
+
         return CheckinRecordsVO.builder()
                 .records(dates)
+                .dailyDurations(dailyDurations)
                 .totalCheckins(totalCheckins)
                 .currentStreak(currentStreak)
                 .longestStreak(longestStreak)
@@ -154,6 +204,9 @@ public class CheckinRedisService {
      */
     private java.time.Duration getExpireTime(LocalDate date) {
         LocalDate nextMonthFirstDay = date.withDayOfMonth(1).plusMonths(1);
-        return java.time.Duration.between(date.atStartOfDay(), nextMonthFirstDay.atStartOfDay());
+        return java.time.Duration.between(
+                java.time.Instant.now(),
+                nextMonthFirstDay.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant()
+        );
     }
 }

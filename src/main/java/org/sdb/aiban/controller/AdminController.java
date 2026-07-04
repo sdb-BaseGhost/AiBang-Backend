@@ -12,6 +12,7 @@ import org.sdb.aiban.dto.request.ChangeRoleRequest;
 import org.sdb.aiban.dto.request.ChangeStatusRequest;
 import org.sdb.aiban.dto.request.UserQueryRequest;
 import org.sdb.aiban.dto.response.AdminDashboardVO;
+import org.sdb.aiban.dto.response.LearningRecordVO;
 import org.sdb.aiban.dto.response.UserImportVO;
 import org.sdb.aiban.dto.response.UserResponse;
 import org.sdb.aiban.service.AdminService;
@@ -32,8 +33,18 @@ public class AdminController {
 
     @Operation(summary = "获取仪表盘统计数据")
     @GetMapping("/dashboard")
-    public Result<AdminDashboardVO> getDashboard() {
-        return Result.success(adminService.getDashboard());
+    public Result<AdminDashboardVO> getDashboard(
+            @RequestParam(required = false) Long userId) {
+        return Result.success(adminService.getDashboard(userId));
+    }
+
+    @Operation(summary = "获取学习记录", description = "分页查询已完成的章节学习记录，支持按用户筛选")
+    @GetMapping("/learning-records")
+    public Result<PageResult<LearningRecordVO>> getLearningRecords(
+            @RequestParam(required = false) Long userId,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size) {
+        return Result.success(adminService.getLearningRecords(userId, page, size));
     }
 
     @Operation(summary = "获取用户列表", description = "分页查询用户，支持按用户名、角色、状态筛选")

@@ -17,7 +17,9 @@ import org.sdb.aiban.entity.Skill;
 import org.sdb.aiban.entity.SkillCategory;
 import org.sdb.aiban.mapper.SkillCategoryMapper;
 import org.sdb.aiban.mapper.SkillMapper;
+import org.sdb.aiban.mapper.UserSkillProgressMapper;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -31,6 +33,9 @@ public class SkillAdminService {
 
     @Autowired
     private SkillCategoryMapper skillCategoryMapper;
+
+    @Autowired
+    private UserSkillProgressMapper userSkillProgressMapper;
 
     private static final Map<String, String> LEVEL_LABELS = Map.of(
         "BEGINNER", "入门",
@@ -60,10 +65,24 @@ public class SkillAdminService {
 
         Page<Skill> skillPage = skillMapper.selectPage(page, wrapper);
 
+        // 批量查询当前页技能的学习人数和完成人数
+        List<Long> skillIds = skillPage.getRecords().stream()
+            .map(Skill::getId).collect(Collectors.toList());
+        Map<Long, long[]> progressMap = new HashMap<>();
+        if (!skillIds.isEmpty()) {
+            List<Map<String, Object>> stats = userSkillProgressMapper.countProgressBySkillIds(skillIds);
+            for (Map<String, Object> row : stats) {
+                Long skillId = ((Number) row.get("skillId")).longValue();
+                long userCount = ((Number) row.get("userCount")).longValue();
+                long completedCount = ((Number) row.get("completedCount")).longValue();
+                progressMap.put(skillId, new long[]{userCount, completedCount});
+            }
+        }
+
         // 转换为 VO
         Page<SkillListVO> voPage = new Page<>(skillPage.getCurrent(), skillPage.getSize(), skillPage.getTotal());
         List<SkillListVO> voList = skillPage.getRecords().stream()
-            .map(this::convertToListVO)
+            .map(skill -> convertToListVO(skill, progressMap))
             .collect(Collectors.toList());
         voPage.setRecords(voList);
 
@@ -191,9 +210,16 @@ public class SkillAdminService {
     }
 
     /**
-     * 转换为列表 VO
+     * 转换为列表 VO（创建/更新技能时使用，无进度数据）
      */
     private SkillListVO convertToListVO(Skill skill) {
+        return convertToListVO(skill, new HashMap<>());
+    }
+
+    /**
+     * 转换为列表 VO（含真实的 userCount 和 completionRate）
+     */
+    private SkillListVO convertToListVO(Skill skill, Map<Long, long[]> progressMap) {
         // 获取分类名称
         String categoryName = "";
         if (skill.getCategoryId() != null) {
@@ -201,6 +227,15 @@ public class SkillAdminService {
             if (category != null) {
                 categoryName = category.getName();
             }
+        }
+
+        // 从预查询的 Map 中取真实数据
+        long userCount = 0;
+        double completionRate = 0.0;
+        long[] stats = progressMap.get(skill.getId());
+        if (stats != null) {
+            userCount = stats[0];
+            completionRate = userCount > 0 ? Math.round(stats[1] * 1000.0 / userCount) / 10.0 : 0.0;
         }
 
         return SkillListVO.builder()
@@ -211,8 +246,8 @@ public class SkillAdminService {
             .level(skill.getLevel())
             .levelLabel(LEVEL_LABELS.getOrDefault(skill.getLevel(), skill.getLevel()))
             .description(skill.getDescription())
-            .userCount(0) // TODO: 统计用户数量
-            .completionRate(0.0) // TODO: 计算完成率
+            .userCount((int) userCount)
+            .completionRate(completionRate)
             .createTime(skill.getCreateTime())
             .build();
     }

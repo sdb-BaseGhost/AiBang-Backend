@@ -57,5 +57,6 @@ public class AdminDashboardVO {
         private String date;
         private Long users;
         private Long hours;
+        private Long tokens;
     }
 }

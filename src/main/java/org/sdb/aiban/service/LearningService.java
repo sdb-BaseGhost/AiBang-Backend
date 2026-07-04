@@ -6,10 +6,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.sdb.aiban.common.result.PageResult;
 import org.sdb.aiban.dto.response.*;
+import org.sdb.aiban.entity.DailyStudyDuration;
 import org.sdb.aiban.entity.LearningRecord;
 import org.sdb.aiban.entity.SkillChapter;
 import org.sdb.aiban.entity.UserChapterProgress;
 import org.sdb.aiban.entity.UserSkillProgress;
+import org.sdb.aiban.mapper.DailyStudyDurationMapper;
 import org.sdb.aiban.mapper.LearningRecordMapper;
 import org.sdb.aiban.mapper.SkillChapterMapper;
 import org.sdb.aiban.mapper.UserChapterProgressMapper;
@@ -34,6 +36,7 @@ public class LearningService {
     private final SkillChapterMapper skillChapterMapper;
     private final UserChapterProgressMapper userChapterProgressMapper;
     private final SkillService skillService;
+    private final DailyStudyDurationMapper dailyStudyDurationMapper;
 
     /**
      * 创建学习记录
@@ -60,11 +63,13 @@ public class LearningService {
         double totalHours = allRecords.stream().mapToInt(LearningRecord::getDuration).sum() / 60.0;
         totalHours = Math.round(totalHours * 10.0) / 10.0;
 
-        // 今日学习时长
-        LocalDateTime todayStart = LocalDateTime.of(LocalDate.now(), LocalTime.MIN);
-        int todayMinutes = allRecords.stream()
-            .filter(r -> r.getCreateTime().isAfter(todayStart))
-            .mapToInt(LearningRecord::getDuration).sum();
+        // 今日学习时长（只取 daily_study_duration 表，打卡时用户选择的时长）
+        DailyStudyDuration todayRecord = dailyStudyDurationMapper.selectOne(
+            new LambdaQueryWrapper<DailyStudyDuration>()
+                .eq(DailyStudyDuration::getUserId, userId)
+                .eq(DailyStudyDuration::getStudyDate, LocalDate.now()));
+        int todayMinutes = (todayRecord != null) ? todayRecord.getDurationMinutes() : 0;
+        log.info("Dashboard todayMinutes: userId={}, todayRecord={}, todayMinutes={}", userId, todayRecord, todayMinutes);
 
         // 技能进度统计
         List<UserSkillProgress> progressList = userSkillProgressMapper.selectList(

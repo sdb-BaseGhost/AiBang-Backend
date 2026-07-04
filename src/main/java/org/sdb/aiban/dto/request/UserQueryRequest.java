@@ -4,7 +4,7 @@ import lombok.Data;
 
 @Data
 public class UserQueryRequest {
-    private String username;
+    private String keyword;
     private String role;
     private String status;
     private Integer page = 1;
